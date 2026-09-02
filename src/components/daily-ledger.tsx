@@ -113,7 +113,7 @@ export function DailyLedger() {
         </div>
 
         <div className="mt-4 flex items-center gap-1.5">
-          {([3, 6, 12] as ProjectionMonths[]).map((m) => (
+          {([1, 3, 6, 12] as ProjectionMonths[]).map((m) => (
             <button
               key={m}
               type="button"

@@ -7,6 +7,7 @@ import type {
   DayProjection,
   OccurrenceOverride,
   Projection,
+  ProjectionMonths,
 } from "./types";
 
 function signedCents(type: CashflowItem["type"], dollars: number): number {
@@ -155,6 +156,6 @@ export function projectCashflow(args: {
   };
 }
 
-export function windowEnd(fromDate: IsoDate, months: 3 | 6 | 12): IsoDate {
+export function windowEnd(fromDate: IsoDate, months: ProjectionMonths): IsoDate {
   return addDays(addMonths(fromDate, months), -1);
 }

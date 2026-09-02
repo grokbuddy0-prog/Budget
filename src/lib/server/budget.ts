@@ -53,7 +53,7 @@ type OverrideRow = {
 };
 
 function asMonths(n: number): ProjectionMonths {
-  if (n === 3 || n === 12) return n;
+  if (n === 1 || n === 3 || n === 12) return n;
   return 6;
 }
 
@@ -144,7 +144,7 @@ export const getBudget = createServerFn({ method: "GET" })
 const settingsInput = z.object({
   startingBalance: money,
   startingBalanceDate: iso,
-  projectionMonths: z.union([z.literal(3), z.literal(6), z.literal(12)]),
+  projectionMonths: z.union([z.literal(1), z.literal(3), z.literal(6), z.literal(12)]),
   balanceView: z.enum(["every_day", "activity"]).optional(),
   claimAdmin: z.boolean().optional(),
 });

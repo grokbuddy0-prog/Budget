@@ -63,6 +63,7 @@ export function Onboarding() {
             value={months}
             onChange={(e) => setMonths(Number(e.target.value) as ProjectionMonths)}
           >
+            <option value={1}>1 month</option>
             <option value={3}>3 months</option>
             <option value={6}>6 months</option>
             <option value={12}>12 months</option>

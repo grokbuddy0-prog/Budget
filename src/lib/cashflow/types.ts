@@ -13,7 +13,7 @@ export const FREQUENCIES = [
 export type Frequency = (typeof FREQUENCIES)[number];
 export type ItemType = "income" | "bill";
 export type OverrideKind = "skip" | "amount" | "move";
-export type ProjectionMonths = 3 | 6 | 12;
+export type ProjectionMonths = 1 | 3 | 6 | 12;
 export type BalanceView = "every_day" | "activity";
 
 export type CashflowItem = {

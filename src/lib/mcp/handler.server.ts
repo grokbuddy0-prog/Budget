@@ -97,7 +97,7 @@ function requireApiKey(request: Request): Response | null {
 }
 
 function asMonths(n: number): ProjectionMonths {
-  if (n === 3 || n === 12) return n;
+  if (n === 1 || n === 3 || n === 12) return n;
   return 6;
 }
 
