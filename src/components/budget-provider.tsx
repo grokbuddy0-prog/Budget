@@ -26,6 +26,8 @@ import {
   upsertItem,
   upsertOverride,
 } from "@/lib/server/budget";
+import { rememberVaultToken } from "@/lib/crypto/client";
+import { RecoveryKeyCard, VaultUnlock } from "@/components/vault-unlock";
 
 export type ItemDraft = Omit<CashflowItem, "id"> & { id?: string };
 
@@ -70,6 +72,7 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<CashflowItem[]>([]);
   const [overrides, setOverrides] = useState<OccurrenceOverride[]>([]);
   const [months, setMonths] = useState<ProjectionMonths>(6);
+  const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
   const today = todayLocalIso();
 
   const refresh = useCallback(async () => {
@@ -84,6 +87,8 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
       const message = err instanceof Error ? err.message : "Could not load budget";
       if (message === "Unauthorized") {
         setError("Unauthorized");
+      } else if (message.includes("VaultLocked")) {
+        setError("VaultLocked");
       } else {
         setError(message);
       }
@@ -93,6 +98,12 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    try {
+      const pending = sessionStorage.getItem("fb.recovery-once");
+      if (pending) setRecoveryKey(pending);
+    } catch {
+      /* private mode */
+    }
     void refresh();
   }, [refresh]);
 
@@ -281,6 +292,38 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
       removeOverride,
     ],
   );
+
+  if (error === "VaultLocked") {
+    return (
+      <div className="mx-auto min-h-dvh w-full max-w-lg bg-bg">
+        <VaultUnlock
+          onUnlocked={(key) => {
+            if (key) setRecoveryKey(key);
+            setLoading(true);
+            void refresh();
+          }}
+        />
+      </div>
+    );
+  }
+
+  if (recoveryKey) {
+    return (
+      <div className="mx-auto min-h-dvh w-full max-w-lg bg-bg">
+        <RecoveryKeyCard
+          recoveryKey={recoveryKey}
+          onDone={() => {
+            try {
+              sessionStorage.removeItem("fb.recovery-once");
+            } catch {
+              /* private mode */
+            }
+            setRecoveryKey(null);
+          }}
+        />
+      </div>
+    );
+  }
 
   return <BudgetContext.Provider value={value}>{children}</BudgetContext.Provider>;
 }

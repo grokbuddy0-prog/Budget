@@ -3,6 +3,8 @@ import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { authClient, authEnabled } from "@/lib/auth/client";
+import { rememberVaultToken } from "@/lib/crypto/client";
+import { unlockVault } from "@/lib/server/vault";
 
 /** Same key the auth client reads in the live-preview iframe. */
 const PREVIEW_BEARER_KEY = "grok-auth.bearer-token";
@@ -121,6 +123,15 @@ export async function emailSignIn(email: string, password: string) {
   if (error) throw new Error(error.message ?? "Sign-in failed");
   rememberSessionToken(data);
   await refreshSession();
+  const vault = await unlockVault({ data: { password } });
+  rememberVaultToken(vault.vaultToken);
+  if (vault.recoveryKey) {
+    try {
+      sessionStorage.setItem("fb.recovery-once", vault.recoveryKey);
+    } catch {
+      /* private mode */
+    }
+  }
 }
 
 export async function emailSignUp(name: string, email: string, password: string) {
@@ -128,4 +139,13 @@ export async function emailSignUp(name: string, email: string, password: string)
   if (error) throw new Error(error.message ?? "Sign-up failed");
   rememberSessionToken(data);
   await refreshSession();
+  const vault = await unlockVault({ data: { password } });
+  rememberVaultToken(vault.vaultToken);
+  if (vault.recoveryKey) {
+    try {
+      sessionStorage.setItem("fb.recovery-once", vault.recoveryKey);
+    } catch {
+      /* private mode */
+    }
+  }
 }

@@ -1,7 +1,6 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import {
   FREQUENCIES,
-  dollarsFromUnknown,
   isIsoDate,
   parseDollars,
   parseIso,
@@ -12,9 +11,16 @@ import {
   type Frequency,
   type ItemType,
   type OccurrenceOverride,
-  type ProjectionMonths,
-  type UserSettings,
 } from "@/lib/cashflow";
+import {
+  encryptCents,
+  encryptString,
+  mapItemWithDek,
+  mapOverrideWithDek,
+  mapSettingsWithDek,
+  sealPlaintext,
+  unwrapMcpDek,
+} from "@/lib/crypto/vault.server";
 import { getSql } from "@/lib/db";
 import {
   getOverviewView,
@@ -33,8 +39,10 @@ type RpcId = string | number | null;
 type ItemRow = {
   id: string;
   name: string;
+  name_enc: string | null;
   type: "income" | "bill";
   amount: unknown;
+  amount_enc: string | null;
   frequency: CashflowItem["frequency"];
   start_date: string;
   end_date: string | null;
@@ -44,6 +52,7 @@ type ItemRow = {
   weekday: number | null;
   anchor_date: string | null;
   account_label: string;
+  account_label_enc: string | null;
   paused: boolean;
 };
 
@@ -96,28 +105,8 @@ function requireApiKey(request: Request): Response | null {
   return null;
 }
 
-function asMonths(n: number): ProjectionMonths {
-  if (n === 1 || n === 3 || n === 12) return n;
-  return 6;
-}
-
-function mapItem(row: ItemRow): CashflowItem {
-  return {
-    id: row.id,
-    name: row.name,
-    type: row.type,
-    amount: dollarsFromUnknown(row.amount),
-    frequency: row.frequency,
-    startDate: row.start_date,
-    endDate: row.end_date,
-    dueDay: row.due_day,
-    semiDay1: row.semi_day_1,
-    semiDay2: row.semi_day_2,
-    weekday: row.weekday,
-    anchorDate: row.anchor_date,
-    accountLabel: row.account_label || "Checking",
-    paused: Boolean(row.paused),
-  };
+function mapItem(row: ItemRow, dek: Buffer): CashflowItem {
+  return mapItemWithDek(row, dek);
 }
 
 async function resolveUserId(): Promise<string> {
@@ -138,28 +127,32 @@ async function resolveUserId(): Promise<string> {
   throw new Error("No user found. Open Forward Balance and create an account, or set MCP_USER_ID.");
 }
 
-async function loadBudget(userId: string): Promise<BudgetSnapshot> {
+async function loadBudget(userId: string, dek: Buffer): Promise<BudgetSnapshot> {
   const sql = await getSql();
+  await sealPlaintext(sql, userId, dek);
   const [settingsRows, itemRows, overrideRows] = await Promise.all([
     sql<{
       starting_balance: unknown;
+      starting_balance_enc: string | null;
       starting_balance_date: string;
       currency: string;
       projection_months: number;
       balance_view: string | null;
       alert_threshold: unknown;
+      alert_threshold_enc: string | null;
       is_admin: boolean;
     }>`
-      select starting_balance, starting_balance_date, currency, projection_months, balance_view, alert_threshold, is_admin
+      select starting_balance, starting_balance_enc, starting_balance_date, currency,
+             projection_months, balance_view, alert_threshold, alert_threshold_enc, is_admin
       from user_settings where user_id = ${userId}
     `,
     sql<ItemRow>`
-      select id, name, type, amount, frequency, start_date, end_date,
+      select id, name, name_enc, type, amount, amount_enc, frequency, start_date, end_date,
              due_day, semi_day_1, semi_day_2, weekday, anchor_date,
-             account_label, paused
+             account_label, account_label_enc, paused
       from cashflow_items
       where user_id = ${userId}
-      order by type desc, name
+      order by type desc, start_date, id
     `,
     sql<{
       id: string;
@@ -167,36 +160,19 @@ async function loadBudget(userId: string): Promise<BudgetSnapshot> {
       original_date: string;
       kind: OccurrenceOverride["kind"];
       amount: unknown;
+      amount_enc: string | null;
       moved_date: string | null;
     }>`
-      select id, item_id, original_date, kind, amount, moved_date
+      select id, item_id, original_date, kind, amount, amount_enc, moved_date
       from occurrence_overrides
       where user_id = ${userId}
     `,
   ]);
   const settingsRow = settingsRows[0];
-  const settings: UserSettings | null = settingsRow
-    ? {
-        startingBalance: dollarsFromUnknown(settingsRow.starting_balance),
-        startingBalanceDate: settingsRow.starting_balance_date,
-        currency: settingsRow.currency || "USD",
-        projectionMonths: asMonths(Number(settingsRow.projection_months) || 6),
-        balanceView: settingsRow.balance_view === "activity" ? "activity" : "every_day",
-        alertThreshold: Math.max(0, dollarsFromUnknown(settingsRow.alert_threshold)),
-        isAdmin: Boolean(settingsRow.is_admin),
-      }
-    : null;
   return {
-    settings,
-    items: itemRows.map(mapItem),
-    overrides: overrideRows.map((row) => ({
-      id: row.id,
-      itemId: row.item_id,
-      originalDate: row.original_date,
-      kind: row.kind,
-      amount: row.amount == null ? null : dollarsFromUnknown(row.amount),
-      movedDate: row.moved_date,
-    })),
+    settings: settingsRow ? mapSettingsWithDek(settingsRow, dek) : null,
+    items: itemRows.map((row) => mapItem(row, dek)),
+    overrides: overrideRows.map((row) => mapOverrideWithDek(row, dek)),
   };
 }
 
@@ -233,6 +209,7 @@ function frequencyOf(value: unknown, fallback: Frequency): Frequency {
 
 async function insertItem(
   userId: string,
+  dek: Buffer,
   item: {
     name: string;
     type: ItemType;
@@ -244,39 +221,54 @@ async function insertItem(
     semiDay2: number | null;
     weekday: number | null;
     anchorDate: string | null;
+    notes?: string;
   },
 ): Promise<string> {
   const sql = await getSql();
   const id = randomUUID();
+  const nameEnc = encryptString(dek, item.name);
+  const amountEnc = encryptCents(dek, item.amount);
+  const labelEnc = encryptString(dek, "Checking");
+  const notesEnc = item.notes ? encryptString(dek, item.notes) : null;
   await sql`
     insert into cashflow_items (
-      id, user_id, name, type, amount, frequency, start_date, end_date,
-      due_day, semi_day_1, semi_day_2, weekday, anchor_date, account_label, paused, updated_at
+      id, user_id, name, name_enc, type, amount, amount_enc, frequency, start_date, end_date,
+      due_day, semi_day_1, semi_day_2, weekday, anchor_date, account_label, account_label_enc,
+      notes_enc, paused, updated_at
     ) values (
-      ${id}, ${userId}, ${item.name}, ${item.type}, ${item.amount},
+      ${id}, ${userId}, '', ${nameEnc}, ${item.type}, 0, ${amountEnc},
       ${item.frequency}, ${item.startDate}, ${null}, ${item.dueDay},
       ${item.semiDay1}, ${item.semiDay2}, ${item.weekday}, ${item.anchorDate},
-      ${"Checking"}, ${false}, now()
+      '', ${labelEnc}, ${notesEnc}, ${false}, now()
     )
   `;
   return id;
 }
 
+async function requireDek(userId: string): Promise<Buffer> {
+  const dek = await unwrapMcpDek(userId);
+  if (!dek) {
+    throw new Error("Open Forward Balance and sign in once so Grok Bot can use your key.");
+  }
+  return dek;
+}
+
 async function callTool(name: string, args: Json): Promise<unknown> {
   const userId = await resolveUserId();
+  const dek = await requireDek(userId);
   const today = todayLocalIso();
 
   if (name === "get_overview") {
-    return getOverviewView(await loadBudget(userId), today);
+    return getOverviewView(await loadBudget(userId, dek), today);
   }
 
   if (name === "list_upcoming") {
     const days = typeof args.days === "number" ? args.days : Number(args.days ?? 14);
-    return listUpcomingView(await loadBudget(userId), today, Number.isFinite(days) ? days : 14);
+    return listUpcomingView(await loadBudget(userId, dek), today, Number.isFinite(days) ? days : 14);
   }
 
   if (name === "list_recurring") {
-    return listRecurringView(await loadBudget(userId), today);
+    return listRecurringView(await loadBudget(userId, dek), today);
   }
 
   if (name === "add_recurring") {
@@ -298,7 +290,8 @@ async function callTool(name: string, args: Json): Promise<unknown> {
         : parseIso(startDate).d;
     const frequency = frequencyOf(args.frequency, "monthly");
     const weekday = weekdayUtc(startDate);
-    const id = await insertItem(userId, {
+    const notes = typeof args.notes === "string" ? args.notes.trim() : "";
+    const id = await insertItem(userId, dek, {
       name: itemName,
       type: typeRaw,
       amount,
@@ -309,6 +302,7 @@ async function callTool(name: string, args: Json): Promise<unknown> {
       semiDay2: frequency === "semimonthly" ? 15 : null,
       weekday: frequency === "weekly" || frequency === "biweekly" ? weekday : null,
       anchorDate: frequency === "biweekly" ? startDate : null,
+      notes: notes || undefined,
     });
     return { id, name: itemName, type: typeRaw, amount_cents: toCents(amount), frequency, start_date: startDate, due_day: dueDay };
   }
@@ -318,15 +312,15 @@ async function callTool(name: string, args: Json): Promise<unknown> {
     if (!id) throw new Error("id is required");
     const sql = await getSql();
     const rows = await sql<ItemRow>`
-      select id, name, type, amount, frequency, start_date, end_date,
+      select id, name, name_enc, type, amount, amount_enc, frequency, start_date, end_date,
              due_day, semi_day_1, semi_day_2, weekday, anchor_date,
-             account_label, paused
+             account_label, account_label_enc, paused
       from cashflow_items
       where id = ${id} and user_id = ${userId}
     `;
     const current = rows[0];
     if (!current) throw new Error("id not found");
-    const next = mapItem(current);
+    const next = mapItem(current, dek);
     if (args.name != null) next.name = String(args.name).trim() || next.name;
     if (args.amount != null) {
       const amount = parseAmount(args.amount, "amount");
@@ -338,14 +332,19 @@ async function callTool(name: string, args: Json): Promise<unknown> {
     const dateArg = args.start_date ?? args.date;
     if (dateArg != null) next.startDate = parseDate(dateArg, "date");
     if (typeof args.enabled === "boolean") next.paused = !args.enabled;
+    const notesEnc =
+      typeof args.notes === "string" ? encryptString(dek, args.notes) : undefined;
     await sql`
       update cashflow_items set
-        name = ${next.name},
-        amount = ${next.amount},
+        name = '',
+        name_enc = ${encryptString(dek, next.name)},
+        amount = 0,
+        amount_enc = ${encryptCents(dek, next.amount)},
         frequency = ${next.frequency},
         start_date = ${next.startDate},
         due_day = ${next.dueDay},
         paused = ${next.paused},
+        notes_enc = coalesce(${notesEnc ?? null}, notes_enc),
         updated_at = now()
       where id = ${id} and user_id = ${userId}
     `;
@@ -371,7 +370,7 @@ async function callTool(name: string, args: Json): Promise<unknown> {
     const amount = parseAmount(args.amount, "amount");
     if (amount <= 0) throw new Error("amount must be greater than zero");
     const date = parseDate(args.date, "date");
-    const id = await insertItem(userId, {
+    const id = await insertItem(userId, dek, {
       name: itemName,
       type,
       amount,
@@ -382,6 +381,7 @@ async function callTool(name: string, args: Json): Promise<unknown> {
       semiDay2: null,
       weekday: null,
       anchorDate: null,
+      notes: typeof args.notes === "string" ? args.notes.trim() || undefined : undefined,
     });
     return { id, name: itemName, type, amount_cents: toCents(amount), date };
   }
@@ -390,17 +390,17 @@ async function callTool(name: string, args: Json): Promise<unknown> {
     const amount = parseAmount(args.amount, "amount");
     const date = parseDate(args.date, "date");
     const sql = await getSql();
-    await sql`
-      insert into user_settings (
-        user_id, starting_balance, starting_balance_date, currency, projection_months, is_admin, updated_at
-      ) values (
-        ${userId}, ${amount}, ${date}, 'USD', 6, false, now()
-      )
-      on conflict (user_id) do update set
-        starting_balance = excluded.starting_balance,
-        starting_balance_date = excluded.starting_balance_date,
+    const startEnc = encryptCents(dek, amount);
+    const updated = await sql<{ user_id: string }>`
+      update user_settings set
+        starting_balance = 0,
+        starting_balance_enc = ${startEnc},
+        starting_balance_date = ${date},
         updated_at = now()
+      where user_id = ${userId}
+      returning user_id
     `;
+    if (!updated[0]) throw new Error("No budget set. Open Forward Balance first.");
     return { starting_balance_cents: toCents(amount), starting_balance_date: date };
   }
 
@@ -409,7 +409,7 @@ async function callTool(name: string, args: Json): Promise<unknown> {
     if (!recurringId) throw new Error("recurring_id is required");
     const newAmount = parseAmount(args.new_amount, "new_amount");
     if (newAmount <= 0) throw new Error("new_amount must be greater than zero");
-    return getWhatIfView(await loadBudget(userId), today, recurringId, newAmount);
+    return getWhatIfView(await loadBudget(userId, dek), today, recurringId, newAmount);
   }
 
   throw new Error(`Unknown tool: ${name}`);

@@ -2,14 +2,19 @@ import { randomUUID } from "node:crypto";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { authMiddleware } from "@/lib/auth/middleware";
+import { vaultMiddleware } from "@/lib/crypto/middleware";
 import {
-  dollarsFromUnknown,
+  encryptCents,
+  encryptString,
+  mapItemWithDek,
+  mapOverrideWithDek,
+  mapSettingsWithDek,
+  sealPlaintext,
+} from "@/lib/crypto/vault.server";
+import {
   isIsoDate,
-  type BalanceView,
   type CashflowItem,
   type OccurrenceOverride,
-  type ProjectionMonths,
-  type UserSettings,
 } from "@/lib/cashflow";
 import { getSql } from "@/lib/db";
 
@@ -19,19 +24,23 @@ const posMoney = z.coerce.number().finite().positive();
 
 type SettingsRow = {
   starting_balance: unknown;
+  starting_balance_enc: string | null;
   starting_balance_date: string;
   currency: string;
   projection_months: number;
   balance_view: string | null;
   alert_threshold: unknown;
+  alert_threshold_enc: string | null;
   is_admin: boolean;
 };
 
 type ItemRow = {
   id: string;
   name: string;
+  name_enc: string | null;
   type: "income" | "bill";
   amount: unknown;
+  amount_enc: string | null;
   frequency: CashflowItem["frequency"];
   start_date: string;
   end_date: string | null;
@@ -41,6 +50,7 @@ type ItemRow = {
   weekday: number | null;
   anchor_date: string | null;
   account_label: string;
+  account_label_enc: string | null;
   paused: boolean;
 };
 
@@ -50,58 +60,14 @@ type OverrideRow = {
   original_date: string;
   kind: OccurrenceOverride["kind"];
   amount: unknown;
+  amount_enc: string | null;
   moved_date: string | null;
 };
 
-function asMonths(n: number): ProjectionMonths {
-  if (n === 1 || n === 3 || n === 12) return n;
-  return 6;
-}
-
-function asBalanceView(v: string | null | undefined): BalanceView {
-  return v === "activity" ? "activity" : "every_day";
-}
-
-function mapSettings(row: SettingsRow): UserSettings {
-  return {
-    startingBalance: dollarsFromUnknown(row.starting_balance),
-    startingBalanceDate: row.starting_balance_date,
-    currency: row.currency || "USD",
-    projectionMonths: asMonths(Number(row.projection_months) || 6),
-    balanceView: asBalanceView(row.balance_view),
-    alertThreshold: Math.max(0, dollarsFromUnknown(row.alert_threshold)),
-    isAdmin: Boolean(row.is_admin),
-  };
-}
-
-function mapItem(row: ItemRow): CashflowItem {
-  return {
-    id: row.id,
-    name: row.name,
-    type: row.type,
-    amount: dollarsFromUnknown(row.amount),
-    frequency: row.frequency,
-    startDate: row.start_date,
-    endDate: row.end_date,
-    dueDay: row.due_day,
-    semiDay1: row.semi_day_1,
-    semiDay2: row.semi_day_2,
-    weekday: row.weekday,
-    anchorDate: row.anchor_date,
-    accountLabel: row.account_label || "Checking",
-    paused: Boolean(row.paused),
-  };
-}
-
-function mapOverride(row: OverrideRow): OccurrenceOverride {
-  return {
-    id: row.id,
-    itemId: row.item_id,
-    originalDate: row.original_date,
-    kind: row.kind,
-    amount: row.amount == null ? null : dollarsFromUnknown(row.amount),
-    movedDate: row.moved_date,
-  };
+function dekOf(context: { dek?: Buffer }): Buffer {
+  const dek = context.dek;
+  if (!dek) throw new Error("VaultLocked");
+  return dek;
 }
 
 export const getBootstrapState = createServerFn({ method: "GET" }).handler(
@@ -113,33 +79,36 @@ export const getBootstrapState = createServerFn({ method: "GET" }).handler(
 );
 
 export const getBudget = createServerFn({ method: "GET" })
-  .middleware([authMiddleware])
+  .middleware([authMiddleware, vaultMiddleware])
   .handler(async ({ context }) => {
     const sql = await getSql();
     const uid = context.userId;
+    const dek = dekOf(context);
+    await sealPlaintext(sql, uid, dek);
     const [settingsRows, itemRows, overrideRows] = await Promise.all([
       sql<SettingsRow>`
-        select starting_balance, starting_balance_date, currency, projection_months, balance_view, alert_threshold, is_admin
+        select starting_balance, starting_balance_enc, starting_balance_date, currency,
+               projection_months, balance_view, alert_threshold, alert_threshold_enc, is_admin
         from user_settings where user_id = ${uid}
       `,
       sql<ItemRow>`
-        select id, name, type, amount, frequency, start_date, end_date,
+        select id, name, name_enc, type, amount, amount_enc, frequency, start_date, end_date,
                due_day, semi_day_1, semi_day_2, weekday, anchor_date,
-               account_label, paused
+               account_label, account_label_enc, paused
         from cashflow_items
         where user_id = ${uid}
-        order by type desc, name
+        order by type desc, start_date, id
       `,
       sql<OverrideRow>`
-        select id, item_id, original_date, kind, amount, moved_date
+        select id, item_id, original_date, kind, amount, amount_enc, moved_date
         from occurrence_overrides
         where user_id = ${uid}
       `,
     ]);
     return {
-      settings: settingsRows[0] ? mapSettings(settingsRows[0]) : null,
-      items: itemRows.map(mapItem),
-      overrides: overrideRows.map(mapOverride),
+      settings: settingsRows[0] ? mapSettingsWithDek(settingsRows[0], dek) : null,
+      items: itemRows.map((row) => mapItemWithDek(row, dek)),
+      overrides: overrideRows.map((row) => mapOverrideWithDek(row, dek)),
     };
   });
 
@@ -153,11 +122,12 @@ const settingsInput = z.object({
 });
 
 export const saveSettings = createServerFn({ method: "POST" })
-  .middleware([authMiddleware])
+  .middleware([authMiddleware, vaultMiddleware])
   .validator((data: unknown) => settingsInput.parse(data))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const uid = context.userId;
+    const dek = dekOf(context);
     const existing = await sql<{ is_admin: boolean }>`
       select is_admin from user_settings where user_id = ${uid}
     `;
@@ -170,20 +140,28 @@ export const saveSettings = createServerFn({ method: "POST" })
     }
     const view = data.balanceView ?? "every_day";
     const threshold = data.alertThreshold ?? 0;
+    const startEnc = encryptCents(dek, data.startingBalance);
+    const alertEnc = encryptCents(dek, threshold);
     await sql`
       insert into user_settings (
-        user_id, starting_balance, starting_balance_date, currency, projection_months, balance_view, alert_threshold, is_admin, updated_at
+        user_id, starting_balance, starting_balance_enc, starting_balance_date, currency,
+        projection_months, balance_view, alert_threshold, alert_threshold_enc, is_admin,
+        crypto_migrated, updated_at
       ) values (
-        ${uid}, ${data.startingBalance}, ${data.startingBalanceDate}, 'USD',
-        ${data.projectionMonths}, ${view}, ${threshold}, ${isAdmin}, now()
+        ${uid}, 0, ${startEnc}, ${data.startingBalanceDate}, 'USD',
+        ${data.projectionMonths}, ${view}, 0, ${alertEnc}, ${isAdmin},
+        true, now()
       )
       on conflict (user_id) do update set
-        starting_balance = excluded.starting_balance,
+        starting_balance = 0,
+        starting_balance_enc = excluded.starting_balance_enc,
         starting_balance_date = excluded.starting_balance_date,
         projection_months = excluded.projection_months,
         balance_view = excluded.balance_view,
-        alert_threshold = excluded.alert_threshold,
+        alert_threshold = 0,
+        alert_threshold_enc = excluded.alert_threshold_enc,
         is_admin = user_settings.is_admin or excluded.is_admin,
+        crypto_migrated = true,
         updated_at = now()
     `;
     return { ok: true as const, isAdmin };
@@ -215,25 +193,31 @@ const itemInput = z.object({
 });
 
 export const upsertItem = createServerFn({ method: "POST" })
-  .middleware([authMiddleware])
+  .middleware([authMiddleware, vaultMiddleware])
   .validator((data: unknown) => itemInput.parse(data))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const id = data.id ?? randomUUID();
+    const dek = dekOf(context);
+    const nameEnc = encryptString(dek, data.name);
+    const amountEnc = encryptCents(dek, data.amount);
+    const labelEnc = encryptString(dek, data.accountLabel);
     await sql`
       insert into cashflow_items (
-        id, user_id, name, type, amount, frequency, start_date, end_date,
-        due_day, semi_day_1, semi_day_2, weekday, anchor_date, account_label, paused, updated_at
+        id, user_id, name, name_enc, type, amount, amount_enc, frequency, start_date, end_date,
+        due_day, semi_day_1, semi_day_2, weekday, anchor_date, account_label, account_label_enc, paused, updated_at
       ) values (
-        ${id}, ${context.userId}, ${data.name}, ${data.type}, ${data.amount},
+        ${id}, ${context.userId}, '', ${nameEnc}, ${data.type}, 0, ${amountEnc},
         ${data.frequency}, ${data.startDate}, ${data.endDate}, ${data.dueDay},
         ${data.semiDay1}, ${data.semiDay2}, ${data.weekday}, ${data.anchorDate},
-        ${data.accountLabel}, ${data.paused}, now()
+        '', ${labelEnc}, ${data.paused}, now()
       )
       on conflict (id) do update set
-        name = excluded.name,
+        name = '',
+        name_enc = excluded.name_enc,
         type = excluded.type,
-        amount = excluded.amount,
+        amount = 0,
+        amount_enc = excluded.amount_enc,
         frequency = excluded.frequency,
         start_date = excluded.start_date,
         end_date = excluded.end_date,
@@ -242,7 +226,8 @@ export const upsertItem = createServerFn({ method: "POST" })
         semi_day_2 = excluded.semi_day_2,
         weekday = excluded.weekday,
         anchor_date = excluded.anchor_date,
-        account_label = excluded.account_label,
+        account_label = '',
+        account_label_enc = excluded.account_label_enc,
         paused = excluded.paused,
         updated_at = now()
       where cashflow_items.user_id = ${context.userId}
@@ -251,7 +236,7 @@ export const upsertItem = createServerFn({ method: "POST" })
   });
 
 export const deleteItem = createServerFn({ method: "POST" })
-  .middleware([authMiddleware])
+  .middleware([authMiddleware, vaultMiddleware])
   .validator((data: unknown) => z.object({ id: z.string().min(1) }).parse(data))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
@@ -271,26 +256,29 @@ const overrideInput = z.object({
 });
 
 export const upsertOverride = createServerFn({ method: "POST" })
-  .middleware([authMiddleware])
+  .middleware([authMiddleware, vaultMiddleware])
   .validator((data: unknown) => overrideInput.parse(data))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
+    const dek = dekOf(context);
     const owned = await sql<{ id: string }>`
       select id from cashflow_items
       where id = ${data.itemId} and user_id = ${context.userId}
     `;
     if (!owned[0]) throw new Error("Item not found");
     const id = randomUUID();
+    const amountEnc = data.amount == null ? null : encryptCents(dek, data.amount);
     await sql`
       insert into occurrence_overrides (
-        id, user_id, item_id, original_date, kind, amount, moved_date
+        id, user_id, item_id, original_date, kind, amount, amount_enc, moved_date
       ) values (
         ${id}, ${context.userId}, ${data.itemId}, ${data.originalDate},
-        ${data.kind}, ${data.amount}, ${data.movedDate}
+        ${data.kind}, ${null}, ${amountEnc}, ${data.movedDate}
       )
       on conflict (item_id, original_date) do update set
         kind = excluded.kind,
-        amount = excluded.amount,
+        amount = null,
+        amount_enc = excluded.amount_enc,
         moved_date = excluded.moved_date
       where occurrence_overrides.user_id = ${context.userId}
     `;
@@ -298,7 +286,7 @@ export const upsertOverride = createServerFn({ method: "POST" })
   });
 
 export const clearOverride = createServerFn({ method: "POST" })
-  .middleware([authMiddleware])
+  .middleware([authMiddleware, vaultMiddleware])
   .validator((data: unknown) =>
     z.object({ itemId: z.string().min(1), originalDate: iso }).parse(data),
   )

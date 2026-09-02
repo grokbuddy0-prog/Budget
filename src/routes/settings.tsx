@@ -7,6 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/label";
 import { DateInput, Input, NativeSelect } from "@/components/ui/input";
 import { RedirectToSignIn, UserButton } from "@/lib/auth/gates";
+import { authClient } from "@/lib/auth/client";
+import { rememberVaultToken } from "@/lib/crypto/client";
+import { rewrapVaultPassword } from "@/lib/server/vault";
 import { useCurrentUser } from "@/lib/auth/use-current-user";
 import { parseDollars, type BalanceView, type ProjectionMonths } from "@/lib/cashflow";
 
@@ -34,6 +37,11 @@ function SettingsBody() {
   const [threshold, setThreshold] = useState("");
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [pwSaved, setPwSaved] = useState(false);
+  const [pwBusy, setPwBusy] = useState(false);
+  const [pwError, setPwError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!settings) return;
@@ -121,6 +129,68 @@ function SettingsBody() {
         </Field>
         <Button type="submit" disabled={busy}>
           {busy ? "Saving…" : saved ? "Saved" : "Save"}
+        </Button>
+      </form>
+
+      <form
+        className="mt-10 flex flex-col gap-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setPwBusy(true);
+          setPwError(null);
+          void (async () => {
+            try {
+              const { error } = await authClient.changePassword({
+                currentPassword,
+                newPassword,
+              });
+              if (error) throw new Error(error.message ?? "Could not change password");
+              const vault = await rewrapVaultPassword({
+                data: { currentPassword, newPassword },
+              });
+              rememberVaultToken(vault.vaultToken);
+              setCurrentPassword("");
+              setNewPassword("");
+              setPwSaved(true);
+              window.setTimeout(() => setPwSaved(false), 1600);
+            } catch (err) {
+              setPwError(err instanceof Error ? err.message : "Could not change password");
+            } finally {
+              setPwBusy(false);
+            }
+          })();
+        }}
+      >
+        <h2 className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted">
+          Password
+        </h2>
+        <p className="text-sm text-muted">
+          Changing it also re-locks your encrypted ledger. Lost password plus no
+          recovery key means this budget cannot be recovered.
+        </p>
+        <Field label="Current password">
+          <Input
+            type="password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+            autoComplete="current-password"
+            minLength={8}
+            required
+          />
+        </Field>
+        <Field label="New password">
+          <Input
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            autoComplete="new-password"
+            minLength={8}
+            required
+          />
+        </Field>
+        {pwError ? <p className="text-sm text-danger">{pwError}</p> : null}
+        <Button type="submit" disabled={pwBusy}>
+          {pwBusy ? "Updating…" : pwSaved ? "Updated" : "Change password"}
         </Button>
       </form>
 

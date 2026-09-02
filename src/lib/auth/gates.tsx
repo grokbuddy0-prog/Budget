@@ -1,6 +1,8 @@
 import { useState, useSyncExternalStore, type ReactNode } from "react";
 import { Navigate } from "@tanstack/react-router";
 import { authEnabled, signOut } from "./client";
+import { clearVaultToken } from "@/lib/crypto/client";
+import { lockVault } from "@/lib/server/vault";
 import { hasGateSessionMarker } from "./gate-session-marker";
 import { useCurrentUser, useCurrentUserState } from "./use-current-user";
 
@@ -92,7 +94,12 @@ export function UserButton({ showIdentity = true }: { showIdentity?: boolean } =
           onClick={() => {
             setSigningOut(true);
             // Success navigates away; on failure re-enable so it can be retried.
-            void signOut().catch(() => setSigningOut(false));
+            void lockVault()
+              .catch(() => undefined)
+              .finally(() => {
+                clearVaultToken();
+                void signOut().catch(() => setSigningOut(false));
+              });
           }}
           className="cursor-pointer text-sm underline-offset-4 opacity-70 hover:underline disabled:cursor-wait disabled:no-underline"
         >
