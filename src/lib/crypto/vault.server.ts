@@ -18,7 +18,16 @@ import {
   unwrapKey,
   wrapKey,
 } from "@/lib/crypto/aes";
-import { dollarsFromUnknown, todayLocalIso, type CashflowItem, type OccurrenceOverride, type UserSettings } from "@/lib/cashflow";
+import {
+  dollarsFromUnknown,
+  defaultAccounts,
+  sumAccounts,
+  todayLocalIso,
+  type BankAccount,
+  type CashflowItem,
+  type OccurrenceOverride,
+  type UserSettings,
+} from "@/lib/cashflow";
 import { getSql, type Sql } from "@/lib/db";
 
 export const VAULT_COOKIE = "fb_vault";
@@ -164,8 +173,9 @@ export async function sealPlaintext(sql: Sql, userId: string, dek: Buffer) {
     starting_balance_enc: string | null;
     alert_threshold: unknown;
     alert_threshold_enc: string | null;
+    accounts_enc: string | null;
   }>`
-    select starting_balance, starting_balance_enc, alert_threshold, alert_threshold_enc
+    select starting_balance, starting_balance_enc, alert_threshold, alert_threshold_enc, accounts_enc
     from user_settings where user_id = ${userId}
   `;
   const s = settings[0];
@@ -173,13 +183,18 @@ export async function sealPlaintext(sql: Sql, userId: string, dek: Buffer) {
     const startEnc = s.starting_balance_enc && isCiphertext(s.starting_balance_enc)
       ? s.starting_balance_enc
       : encryptCents(dek, dollarsFromUnknown(s.starting_balance));
+    const startBal = decryptMoneyField(dek, startEnc, s.starting_balance);
     const alertEnc = s.alert_threshold_enc && isCiphertext(s.alert_threshold_enc)
       ? s.alert_threshold_enc
       : encryptCents(dek, Math.max(0, dollarsFromUnknown(s.alert_threshold)));
+    const accountsEnc = s.accounts_enc && isCiphertext(s.accounts_enc)
+      ? s.accounts_enc
+      : encodeAccounts(dek, defaultAccounts(startBal));
     await sql`
       update user_settings set
         starting_balance_enc = ${startEnc},
         alert_threshold_enc = ${alertEnc},
+        accounts_enc = ${accountsEnc},
         starting_balance = 0,
         alert_threshold = 0,
         crypto_migrated = true,
@@ -386,10 +401,14 @@ export function mapSettingsWithDek(row: {
   balance_view: string | null;
   alert_threshold: unknown;
   alert_threshold_enc?: string | null;
+  accounts_enc?: string | null;
   is_admin: boolean;
 }, dek: Buffer): UserSettings {
+  const startingBalance = decryptMoneyField(dek, row.starting_balance_enc, row.starting_balance);
+  const accounts = decodeAccounts(dek, row.accounts_enc, startingBalance);
+  const total = accounts.length ? sumAccounts(accounts) : startingBalance;
   return {
-    startingBalance: decryptMoneyField(dek, row.starting_balance_enc, row.starting_balance),
+    startingBalance: total,
     startingBalanceDate: row.starting_balance_date,
     currency: row.currency || "USD",
     projectionMonths: row.projection_months === 1 || row.projection_months === 3 || row.projection_months === 12
@@ -397,6 +416,7 @@ export function mapSettingsWithDek(row: {
       : 6,
     balanceView: row.balance_view === "activity" ? "activity" : "every_day",
     alertThreshold: Math.max(0, decryptMoneyField(dek, row.alert_threshold_enc, row.alert_threshold)),
+    accounts,
     isAdmin: Boolean(row.is_admin),
   };
 }
@@ -458,6 +478,41 @@ export function mapOverrideWithDek(row: {
     amount,
     movedDate: row.moved_date,
   };
+}
+
+export function encodeAccounts(dek: Buffer, accounts: BankAccount[]): string {
+  const payload = accounts.map((a) => ({
+    id: a.id,
+    name: a.name,
+    cents: Math.round(a.balance * 100),
+  }));
+  return encryptString(dek, JSON.stringify(payload));
+}
+
+export function decodeAccounts(
+  dek: Buffer,
+  enc: string | null | undefined,
+  fallbackBalance: number,
+): BankAccount[] {
+  if (enc && isCiphertext(enc)) {
+    try {
+      const parsed = JSON.parse(decryptString(dek, enc)) as unknown;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map((row, i) => {
+          const r = row as { id?: unknown; name?: unknown; cents?: unknown; balance?: unknown };
+          const cents = typeof r.cents === "number" ? r.cents : Math.round(Number(r.balance ?? 0) * 100);
+          return {
+            id: typeof r.id === "string" && r.id ? r.id : `account-${i + 1}`,
+            name: typeof r.name === "string" && r.name.trim() ? r.name.trim() : `Account ${i + 1}`,
+            balance: cents / 100,
+          };
+        });
+      }
+    } catch {
+      /* fall back */
+    }
+  }
+  return defaultAccounts(fallbackBalance);
 }
 
 export { encryptCents, encryptString };

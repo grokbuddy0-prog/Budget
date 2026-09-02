@@ -11,7 +11,7 @@ import { authClient } from "@/lib/auth/client";
 import { rememberVaultToken } from "@/lib/crypto/client";
 import { rewrapVaultPassword } from "@/lib/server/vault";
 import { useCurrentUser } from "@/lib/auth/use-current-user";
-import { parseDollars, type BalanceView, type ProjectionMonths } from "@/lib/cashflow";
+import { parseDollars, formatMoney, sumAccounts, toCents, type BalanceView, type ProjectionMonths } from "@/lib/cashflow";
 
 export const Route = createFileRoute("/settings")({ component: SettingsPage });
 
@@ -30,7 +30,7 @@ function SettingsPage() {
 function SettingsBody() {
   const user = useCurrentUser();
   const { loading, error, settings, saveUserSettings } = useBudget();
-  const [balance, setBalance] = useState("");
+  const [accounts, setAccounts] = useState<{ id: string; name: string; balance: string }[]>([]);
   const [date, setDate] = useState("");
   const [months, setMonths] = useState<ProjectionMonths>(6);
   const [balanceView, setBalanceView] = useState<BalanceView>("every_day");
@@ -45,7 +45,12 @@ function SettingsBody() {
 
   useEffect(() => {
     if (!settings) return;
-    setBalance(String(settings.startingBalance));
+    setAccounts(
+      (settings.accounts.length
+        ? settings.accounts
+        : [{ id: "checking", name: "Checking", balance: settings.startingBalance }]
+      ).map((a) => ({ id: a.id, name: a.name, balance: String(a.balance) })),
+    );
     setDate(settings.startingBalanceDate);
     setMonths(settings.projectionMonths);
     setBalanceView(settings.balanceView);
@@ -58,8 +63,15 @@ function SettingsBody() {
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    const amount = parseDollars(balance);
-    if (amount == null) return;
+    const parsed = accounts
+      .map((row) => ({
+        id: row.id,
+        name: row.name.trim(),
+        balance: parseDollars(row.balance) ?? 0,
+      }))
+      .filter((row) => row.name);
+    if (!parsed.length) return;
+    const amount = sumAccounts(parsed);
     const asOf = date || settings?.startingBalanceDate;
     if (!asOf) return;
     setBusy(true);
@@ -70,6 +82,7 @@ function SettingsBody() {
         projectionMonths: months,
         balanceView,
         alertThreshold: parseDollars(threshold) ?? 0,
+        accounts: parsed,
       });
       setSaved(true);
       window.setTimeout(() => setSaved(false), 1600);
@@ -82,19 +95,72 @@ function SettingsBody() {
     <div className="px-4 py-4">
       <h1 className="text-xl font-medium tracking-tight">Settings</h1>
       <p className="mt-1 text-sm text-muted">
-        Update the as-of balance whenever you check the bank. Everything after
-        that date is a projection.
+        Update account balances whenever you check the bank. The main screen
+        shows the total. Everything after the as-of date is a projection.
       </p>
 
       <form className="mt-6 flex flex-col gap-3" onSubmit={(e) => void save(e)}>
-        <Field label="Starting balance">
-          <Input
-            value={balance}
-            onChange={(e) => setBalance(e.target.value)}
-            inputMode="decimal"
-            className="font-mono tabular"
-          />
-        </Field>
+        <div className="flex flex-col gap-2">
+          <span className="text-xs font-medium tracking-wide text-muted">Accounts</span>
+          {accounts.map((row) => (
+            <div key={row.id} className="grid grid-cols-[1fr_7.5rem_auto] gap-2">
+              <Input
+                value={row.name}
+                onChange={(e) =>
+                  setAccounts((cur) =>
+                    cur.map((a) => (a.id === row.id ? { ...a, name: e.target.value } : a)),
+                  )
+                }
+                placeholder="Checking"
+              />
+              <Input
+                value={row.balance}
+                onChange={(e) =>
+                  setAccounts((cur) =>
+                    cur.map((a) => (a.id === row.id ? { ...a, balance: e.target.value } : a)),
+                  )
+                }
+                inputMode="decimal"
+                className="font-mono tabular"
+                placeholder="0"
+              />
+              <button
+                type="button"
+                className="text-sm text-muted disabled:opacity-40"
+                disabled={accounts.length < 2}
+                onClick={() => setAccounts((cur) => cur.filter((a) => a.id !== row.id))}
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            className="self-start text-sm text-fg underline-offset-4 hover:underline"
+            onClick={() =>
+              setAccounts((cur) => [
+                ...cur,
+                { id: crypto.randomUUID(), name: "", balance: "" },
+              ])
+            }
+          >
+            Add account
+          </button>
+          <p className="font-mono text-sm tabular text-fg">
+            Total{" "}
+            {formatMoney(
+              toCents(
+                sumAccounts(
+                  accounts.map((row) => ({
+                    id: row.id,
+                    name: row.name || "Account",
+                    balance: parseDollars(row.balance) ?? 0,
+                  })),
+                ),
+              ),
+            )}
+          </p>
+        </div>
         <Field label="As of date">
           <DateInput value={date} onValue={setDate} />
         </Field>

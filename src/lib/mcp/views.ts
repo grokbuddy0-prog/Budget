@@ -81,6 +81,11 @@ export function getOverviewView(snap: BudgetSnapshot, today: IsoDate) {
     as_of: today,
     starting_balance: money(toCents(settings.startingBalance)),
     starting_balance_date: settings.startingBalanceDate,
+    accounts: settings.accounts.map((a) => ({
+      id: a.id,
+      name: a.name,
+      ...money(toCents(a.balance)),
+    })),
     today_balance: money(todayCents),
     cushion: money(cushionCents),
     alert_threshold: money(thresholdCents),

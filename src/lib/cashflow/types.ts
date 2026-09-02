@@ -43,6 +43,12 @@ export type OccurrenceOverride = {
   movedDate: IsoDate | null;
 };
 
+export type BankAccount = {
+  id: string;
+  name: string;
+  balance: number;
+};
+
 export type UserSettings = {
   startingBalance: number;
   startingBalanceDate: IsoDate;
@@ -50,8 +56,17 @@ export type UserSettings = {
   projectionMonths: ProjectionMonths;
   balanceView: BalanceView;
   alertThreshold: number;
+  accounts: BankAccount[];
   isAdmin: boolean;
 };
+
+export function sumAccounts(accounts: BankAccount[]): number {
+  return accounts.reduce((n, a) => n + Math.round(a.balance * 100), 0) / 100;
+}
+
+export function defaultAccounts(startingBalance: number): BankAccount[] {
+  return [{ id: "checking", name: "Checking", balance: startingBalance }];
+}
 
 export type DayEvent = {
   itemId: string;

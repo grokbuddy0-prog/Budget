@@ -6,13 +6,17 @@ import { vaultMiddleware } from "@/lib/crypto/middleware";
 import {
   encryptCents,
   encryptString,
+  encodeAccounts,
   mapItemWithDek,
   mapOverrideWithDek,
   mapSettingsWithDek,
   sealPlaintext,
 } from "@/lib/crypto/vault.server";
 import {
+  defaultAccounts,
   isIsoDate,
+  sumAccounts,
+  type BankAccount,
   type CashflowItem,
   type OccurrenceOverride,
 } from "@/lib/cashflow";
@@ -31,6 +35,7 @@ type SettingsRow = {
   balance_view: string | null;
   alert_threshold: unknown;
   alert_threshold_enc: string | null;
+  accounts_enc: string | null;
   is_admin: boolean;
 };
 
@@ -88,7 +93,7 @@ export const getBudget = createServerFn({ method: "GET" })
     const [settingsRows, itemRows, overrideRows] = await Promise.all([
       sql<SettingsRow>`
         select starting_balance, starting_balance_enc, starting_balance_date, currency,
-               projection_months, balance_view, alert_threshold, alert_threshold_enc, is_admin
+               projection_months, balance_view, alert_threshold, alert_threshold_enc, accounts_enc, is_admin
         from user_settings where user_id = ${uid}
       `,
       sql<ItemRow>`
@@ -118,6 +123,15 @@ const settingsInput = z.object({
   projectionMonths: z.union([z.literal(1), z.literal(3), z.literal(6), z.literal(12)]),
   balanceView: z.enum(["every_day", "activity"]).optional(),
   alertThreshold: z.coerce.number().finite().min(0).optional(),
+  accounts: z
+    .array(
+      z.object({
+        id: z.string().min(1).optional(),
+        name: z.string().trim().min(1).max(40),
+        balance: z.coerce.number().finite(),
+      }),
+    )
+    .optional(),
   claimAdmin: z.boolean().optional(),
 });
 
@@ -140,16 +154,25 @@ export const saveSettings = createServerFn({ method: "POST" })
     }
     const view = data.balanceView ?? "every_day";
     const threshold = data.alertThreshold ?? 0;
-    const startEnc = encryptCents(dek, data.startingBalance);
+    const accounts: BankAccount[] = (data.accounts?.length
+      ? data.accounts.map((a) => ({
+          id: a.id ?? randomUUID(),
+          name: a.name,
+          balance: a.balance,
+        }))
+      : defaultAccounts(data.startingBalance));
+    const total = sumAccounts(accounts);
+    const startEnc = encryptCents(dek, total);
     const alertEnc = encryptCents(dek, threshold);
+    const accountsEnc = encodeAccounts(dek, accounts);
     await sql`
       insert into user_settings (
         user_id, starting_balance, starting_balance_enc, starting_balance_date, currency,
-        projection_months, balance_view, alert_threshold, alert_threshold_enc, is_admin,
+        projection_months, balance_view, alert_threshold, alert_threshold_enc, accounts_enc, is_admin,
         crypto_migrated, updated_at
       ) values (
         ${uid}, 0, ${startEnc}, ${data.startingBalanceDate}, 'USD',
-        ${data.projectionMonths}, ${view}, 0, ${alertEnc}, ${isAdmin},
+        ${data.projectionMonths}, ${view}, 0, ${alertEnc}, ${accountsEnc}, ${isAdmin},
         true, now()
       )
       on conflict (user_id) do update set
@@ -160,6 +183,7 @@ export const saveSettings = createServerFn({ method: "POST" })
         balance_view = excluded.balance_view,
         alert_threshold = 0,
         alert_threshold_enc = excluded.alert_threshold_enc,
+        accounts_enc = excluded.accounts_enc,
         is_admin = user_settings.is_admin or excluded.is_admin,
         crypto_migrated = true,
         updated_at = now()

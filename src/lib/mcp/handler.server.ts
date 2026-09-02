@@ -15,6 +15,7 @@ import {
 import {
   encryptCents,
   encryptString,
+  encodeAccounts,
   mapItemWithDek,
   mapOverrideWithDek,
   mapSettingsWithDek,
@@ -140,10 +141,11 @@ async function loadBudget(userId: string, dek: Buffer): Promise<BudgetSnapshot> 
       balance_view: string | null;
       alert_threshold: unknown;
       alert_threshold_enc: string | null;
+      accounts_enc: string | null;
       is_admin: boolean;
     }>`
       select starting_balance, starting_balance_enc, starting_balance_date, currency,
-             projection_months, balance_view, alert_threshold, alert_threshold_enc, is_admin
+             projection_months, balance_view, alert_threshold, alert_threshold_enc, accounts_enc, is_admin
       from user_settings where user_id = ${userId}
     `,
     sql<ItemRow>`
@@ -390,18 +392,35 @@ async function callTool(name: string, args: Json): Promise<unknown> {
     const amount = parseAmount(args.amount, "amount");
     const date = parseDate(args.date, "date");
     const sql = await getSql();
+    const snap = await loadBudget(userId, dek);
+    const current = snap.settings?.accounts?.length
+      ? snap.settings.accounts
+      : [{ id: "checking", name: "Checking", balance: amount }];
+    const accounts =
+      current.length === 1
+        ? [{ ...current[0], balance: amount }]
+        : [
+            { ...current[0], balance: amount - current.slice(1).reduce((n, a) => n + a.balance, 0) },
+            ...current.slice(1),
+          ];
     const startEnc = encryptCents(dek, amount);
+    const accountsEnc = encodeAccounts(dek, accounts);
     const updated = await sql<{ user_id: string }>`
       update user_settings set
         starting_balance = 0,
         starting_balance_enc = ${startEnc},
+        accounts_enc = ${accountsEnc},
         starting_balance_date = ${date},
         updated_at = now()
       where user_id = ${userId}
       returning user_id
     `;
     if (!updated[0]) throw new Error("No budget set. Open Forward Balance first.");
-    return { starting_balance_cents: toCents(amount), starting_balance_date: date };
+    return {
+      starting_balance_cents: toCents(amount),
+      starting_balance_date: date,
+      accounts: accounts.map((a) => ({ id: a.id, name: a.name, amount_cents: toCents(a.balance) })),
+    };
   }
 
   if (name === "get_what_if") {

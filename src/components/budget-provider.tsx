@@ -49,6 +49,7 @@ type BudgetContextValue = {
     projectionMonths: ProjectionMonths;
     balanceView?: UserSettings["balanceView"];
     alertThreshold?: number;
+    accounts?: UserSettings["accounts"];
     claimAdmin?: boolean;
   }) => Promise<void>;
   saveItem: (draft: ItemDraft) => Promise<string>;
@@ -143,11 +144,13 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
       projectionMonths: ProjectionMonths;
       balanceView?: UserSettings["balanceView"];
       alertThreshold?: number;
+      accounts?: UserSettings["accounts"];
       claimAdmin?: boolean;
     }) => {
       const prev = settings;
       const balanceView = s.balanceView ?? prev?.balanceView ?? "every_day";
       const alertThreshold = s.alertThreshold ?? prev?.alertThreshold ?? 0;
+      const accounts = s.accounts ?? prev?.accounts ?? [];
       setSettings({
         startingBalance: s.startingBalance,
         startingBalanceDate: s.startingBalanceDate,
@@ -155,6 +158,7 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
         projectionMonths: s.projectionMonths,
         balanceView,
         alertThreshold,
+        accounts,
         isAdmin: prev?.isAdmin ?? false,
       });
       setMonths(s.projectionMonths);

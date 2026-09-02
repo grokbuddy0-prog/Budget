@@ -28,6 +28,7 @@ const snap: BudgetSnapshot = {
     projectionMonths: 6,
     balanceView: "every_day",
     alertThreshold: 0,
+    accounts: [{ id: "checking", name: "Checking", balance: 1000 }],
     isAdmin: true,
   },
   items: [
