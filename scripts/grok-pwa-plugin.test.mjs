@@ -474,9 +474,11 @@ test("escapes host-derived values in the install page", () => {
 });
 
 test("renders the manifest with the per-app name", () => {
+  const site = JSON.parse(readFileSync(join(TEMPLATE_ROOT, "src/lib/og/site.json"), "utf8"));
   const manifest = JSON.parse(renderWebManifest("wild-race.grok.me"));
-  assert.equal(manifest.name, "Wild Race");
-  assert.equal(manifest.short_name, "Wild Race");
+  const expected = String(site.title ?? "").trim() || "Wild Race";
+  assert.equal(manifest.name, expected);
+  assert.equal(manifest.short_name, expected);
   assert.equal(manifest.icons[0].src, "/__grok/icon-180.png");
 });
 

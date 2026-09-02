@@ -4,7 +4,7 @@ import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import { Toaster } from "sonner";
 import appCss from "../styles.css?url";
 
-const APP_NAME = "Forward Balance";
+const APP_NAME = "Budget";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -15,6 +15,7 @@ export const Route = createRootRoute({
       { name: "theme-color", content: "#0c0d0f" },
       { name: "description", content: "See your checking balance every day, months ahead." },
       { name: "apple-mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-title", content: APP_NAME },
       { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
     ],
     links: [
