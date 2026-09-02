@@ -2,10 +2,8 @@ import { useMemo, useState } from "react";
 import { Plus } from "lucide-react";
 import { useBudget, type ItemDraft } from "@/components/budget-provider";
 import { ItemForm, NAME_PRESETS } from "@/components/item-form";
-import { Button } from "@/components/ui/button";
+import { OccurrenceEditor } from "@/components/occurrence-editor";
 import { Drawer, DrawerContent } from "@/components/ui/drawer";
-import { Field } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
 import {
   formatLongDate,
   formatMoney,
@@ -349,79 +347,6 @@ function DayRow({
         </p>
       </div>
     </li>
-  );
-}
-
-function OccurrenceEditor({
-  event,
-  date,
-  item,
-  onClose,
-  onEditSeries,
-  onSkip,
-  onAmount,
-  onClear,
-}: {
-  event: DayEvent;
-  date: string;
-  item?: CashflowItem;
-  onClose: () => void;
-  onEditSeries: () => void;
-  onSkip: () => Promise<void>;
-  onAmount: (amount: number) => Promise<void>;
-  onClear: () => Promise<void>;
-}) {
-  const [amount, setAmount] = useState(String(Math.abs(event.amountCents) / 100));
-  const [busy, setBusy] = useState(false);
-
-  return (
-    <div className="flex flex-col gap-3 pb-2">
-      <p className="text-sm text-muted">
-        {formatLongDate(date)}
-        {item ? ` · ${item.accountLabel}` : null}
-      </p>
-      <p
-        className={cn(
-          "font-mono text-2xl tabular",
-          event.amountCents >= 0 ? "text-income" : "text-bill",
-        )}
-      >
-        {formatSigned(event.amountCents)}
-      </p>
-      <Field label="This date only">
-        <Input
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          inputMode="decimal"
-          className="font-mono tabular"
-        />
-      </Field>
-      <Button
-        disabled={busy}
-        onClick={() => {
-          const n = Number(amount.replace(/[$,]/g, ""));
-          if (!Number.isFinite(n) || n <= 0) return;
-          setBusy(true);
-          void onAmount(n).finally(() => setBusy(false));
-        }}
-      >
-        Change this date
-      </Button>
-      <Button variant="outline" disabled={busy} onClick={() => void onSkip()}>
-        Skip this date
-      </Button>
-      {event.overridden ? (
-        <Button variant="ghost" disabled={busy} onClick={() => void onClear()}>
-          Restore series amount
-        </Button>
-      ) : null}
-      <Button variant="secondary" onClick={onEditSeries}>
-        Edit the whole series
-      </Button>
-      <Button variant="ghost" onClick={onClose}>
-        Close
-      </Button>
-    </div>
   );
 }
 

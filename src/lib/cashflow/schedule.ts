@@ -7,7 +7,7 @@ import {
   weekdayUtc,
   type IsoDate,
 } from "./dates";
-import type { CashflowItem } from "./types";
+import type { CashflowItem, OccurrenceOverride } from "./types";
 
 const MAX_OCCURRENCES = 800;
 
@@ -174,6 +174,60 @@ export function nextOccurrence(
     if (d >= onOrAfter) return d;
   }
   return null;
+}
+
+export type SeriesHit = {
+  date: IsoDate;
+  originalDate: IsoDate;
+  amount: number;
+  overridden: boolean;
+  skipped: boolean;
+};
+
+/** Upcoming postings for one series, including skipped dates. */
+export function seriesHits(
+  item: CashflowItem,
+  overrides: OccurrenceOverride[],
+  fromDate: IsoDate,
+  toDate: IsoDate,
+): SeriesHit[] {
+  const byOriginal = new Map<string, OccurrenceOverride>();
+  for (const o of overrides) {
+    if (o.itemId === item.id) byOriginal.set(o.originalDate, o);
+  }
+  const out: SeriesHit[] = [];
+  for (const originalDate of occurrencesForItem(item, toDate)) {
+    if (originalDate < fromDate) continue;
+    const o = byOriginal.get(originalDate);
+    if (!o) {
+      out.push({
+        date: originalDate,
+        originalDate,
+        amount: item.amount,
+        overridden: false,
+        skipped: false,
+      });
+      continue;
+    }
+    if (o.kind === "skip") {
+      out.push({
+        date: originalDate,
+        originalDate,
+        amount: item.amount,
+        overridden: true,
+        skipped: true,
+      });
+      continue;
+    }
+    out.push({
+      date: o.kind === "move" ? (o.movedDate ?? originalDate) : originalDate,
+      originalDate,
+      amount: o.amount ?? item.amount,
+      overridden: true,
+      skipped: false,
+    });
+  }
+  return out;
 }
 
 export const FREQUENCY_LABEL: Record<CashflowItem["frequency"], string> = {

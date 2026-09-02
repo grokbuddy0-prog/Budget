@@ -4,18 +4,23 @@ import { Plus } from "lucide-react";
 import { AppShell, PageSkeleton, RequireAuth } from "@/components/app-shell";
 import { BudgetProvider, useBudget } from "@/components/budget-provider";
 import { ItemForm } from "@/components/item-form";
+import { OccurrenceEditor } from "@/components/occurrence-editor";
 import { Onboarding } from "@/components/onboarding";
+import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent } from "@/components/ui/drawer";
 import { RedirectToSignIn } from "@/lib/auth/gates";
 import {
   addMonths,
+  formatLongDate,
   formatShortDate,
   formatSigned,
   FREQUENCY_LABEL,
   nextOccurrence,
+  seriesHits,
   toCents,
   todayLocalIso,
   type CashflowItem,
+  type DayEvent,
 } from "@/lib/cashflow";
 import { cn } from "@/lib/utils";
 
@@ -33,10 +38,29 @@ function ItemsPage() {
   );
 }
 
+function hitToEvent(item: CashflowItem, hit: ReturnType<typeof seriesHits>[number]): DayEvent {
+  const signed = item.type === "income" ? toCents(hit.amount) : -toCents(hit.amount);
+  return {
+    itemId: item.id,
+    name: item.name,
+    type: item.type,
+    accountLabel: item.accountLabel,
+    amountCents: hit.skipped ? 0 : signed,
+    originalDate: hit.originalDate,
+    overridden: hit.overridden,
+    skipped: hit.skipped,
+  };
+}
+
 function ItemsBody() {
-  const { loading, error, settings, items, saveItem, removeItem } = useBudget();
+  const { loading, error, settings, items, overrides, saveItem, removeItem, setOverride, removeOverride } =
+    useBudget();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<CashflowItem | null>(null);
+  const [series, setSeries] = useState<CashflowItem | null>(null);
+  const [one, setOne] = useState<{ item: CashflowItem; event: DayEvent; date: string } | null>(
+    null,
+  );
   const today = todayLocalIso();
   const horizon = addMonths(today, settings?.projectionMonths ?? 6);
 
@@ -55,9 +79,30 @@ function ItemsBody() {
     return { income, bills, paused };
   }, [items, today, horizon]);
 
+  function openItem(item: CashflowItem) {
+    if (item.frequency === "one_time" || item.paused) {
+      setSeries(null);
+      setEditing(item);
+      setOpen(true);
+      return;
+    }
+    setEditing(null);
+    setOpen(false);
+    setSeries(item);
+  }
+
+  function openSeriesForm(item: CashflowItem) {
+    setSeries(null);
+    setOne(null);
+    setEditing(item);
+    setOpen(true);
+  }
+
   if (loading) return <PageSkeleton />;
   if (error === "Unauthorized") return <RedirectToSignIn />;
   if (!settings) return <Onboarding />;
+
+  const seriesDates = series ? seriesHits(series, overrides, today, horizon).slice(0, 18) : [];
 
   return (
     <div className="px-4 py-4">
@@ -65,7 +110,7 @@ function ItemsBody() {
         <div>
           <h1 className="text-xl font-medium tracking-tight">Paydays & bills</h1>
           <p className="mt-1 text-sm text-muted">
-            Change an amount or date and the daily balance updates immediately.
+            Tap a series to change one date, or the whole series.
           </p>
         </div>
         <button
@@ -88,10 +133,7 @@ function ItemsBody() {
             item={item}
             today={today}
             horizon={horizon}
-            onClick={() => {
-              setEditing(item);
-              setOpen(true);
-            }}
+            onClick={() => openItem(item)}
           />
         ))}
       </Section>
@@ -102,10 +144,7 @@ function ItemsBody() {
             item={item}
             today={today}
             horizon={horizon}
-            onClick={() => {
-              setEditing(item);
-              setOpen(true);
-            }}
+            onClick={() => openItem(item)}
           />
         ))}
       </Section>
@@ -117,10 +156,7 @@ function ItemsBody() {
               item={item}
               today={today}
               horizon={horizon}
-              onClick={() => {
-                setEditing(item);
-                setOpen(true);
-              }}
+              onClick={() => openItem(item)}
             />
           ))}
         </Section>
@@ -133,7 +169,7 @@ function ItemsBody() {
           if (!o) setEditing(null);
         }}
       >
-        <DrawerContent title={editing ? "Edit item" : "Add item"}>
+        <DrawerContent title={editing ? "Edit series" : "Add item"}>
           <ItemForm
             initial={editing ?? undefined}
             onCancel={() => setOpen(false)}
@@ -150,6 +186,109 @@ function ItemsBody() {
                 : undefined
             }
           />
+        </DrawerContent>
+      </Drawer>
+
+      <Drawer open={!!series} onOpenChange={(o) => !o && setSeries(null)}>
+        <DrawerContent title={series?.name ?? "Series"}>
+          {series ? (
+            <div className="flex flex-col gap-3 pb-2">
+              <p className="text-sm text-muted">
+                Tap one date to change just that {series.type === "income" ? "paycheck" : "bill"}.
+                The rest of the series stays the same.
+              </p>
+              <div className="divide-y divide-border rounded-lg border border-border bg-surface-2">
+                {seriesDates.length ? (
+                  seriesDates.map((hit) => {
+                    const cents = series.type === "income" ? toCents(hit.amount) : -toCents(hit.amount);
+                    return (
+                      <button
+                        key={hit.originalDate}
+                        type="button"
+                        onClick={() => {
+                          const item = series;
+                          setSeries(null);
+                          setOne({
+                            item,
+                            event: hitToEvent(item, hit),
+                            date: hit.date,
+                          });
+                        }}
+                        className="flex w-full items-baseline justify-between gap-3 px-3 py-3 text-left"
+                      >
+                        <span className="text-sm text-fg">
+                          {formatLongDate(hit.date)}
+                          {hit.skipped ? (
+                            <span className="ml-1 text-[10px] uppercase text-muted">skipped</span>
+                          ) : hit.overridden ? (
+                            <span className="ml-1 text-[10px] uppercase text-muted">adj</span>
+                          ) : null}
+                        </span>
+                        <span
+                          className={cn(
+                            "font-mono text-sm tabular",
+                            hit.skipped
+                              ? "text-muted line-through"
+                              : series.type === "income"
+                                ? "text-income"
+                                : "text-bill",
+                          )}
+                        >
+                          {formatSigned(cents)}
+                        </span>
+                      </button>
+                    );
+                  })
+                ) : (
+                  <p className="px-3 py-3 text-sm text-muted">No dates in this look-ahead.</p>
+                )}
+              </div>
+              <Button variant="secondary" onClick={() => openSeriesForm(series)}>
+                Edit the whole series
+              </Button>
+              <Button variant="ghost" onClick={() => setSeries(null)}>
+                Close
+              </Button>
+            </div>
+          ) : null}
+        </DrawerContent>
+      </Drawer>
+
+      <Drawer open={!!one} onOpenChange={(o) => !o && setOne(null)}>
+        <DrawerContent title={one?.event.name ?? "This date"}>
+          {one ? (
+            <OccurrenceEditor
+              event={one.event}
+              date={one.date}
+              item={one.item}
+              onClose={() => setOne(null)}
+              onEditSeries={() => openSeriesForm(one.item)}
+              onSkip={async () => {
+                await setOverride({
+                  itemId: one.event.itemId,
+                  originalDate: one.event.originalDate,
+                  kind: "skip",
+                  amount: null,
+                  movedDate: null,
+                });
+                setOne(null);
+              }}
+              onAmount={async (amount) => {
+                await setOverride({
+                  itemId: one.event.itemId,
+                  originalDate: one.event.originalDate,
+                  kind: "amount",
+                  amount,
+                  movedDate: null,
+                });
+                setOne(null);
+              }}
+              onClear={async () => {
+                await removeOverride(one.event.itemId, one.event.originalDate);
+                setOne(null);
+              }}
+            />
+          ) : null}
         </DrawerContent>
       </Drawer>
     </div>
