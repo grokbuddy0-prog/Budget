@@ -30,6 +30,7 @@ function todayBalance(days: DayProjection[], today: string): number | null {
 export function DailyLedger() {
   const {
     projection,
+    alertProjection,
     months,
     setMonths,
     today,
@@ -66,13 +67,12 @@ export function DailyLedger() {
 
   const heroCents = todayBalance(projection.days, today) ?? projection.endingCents;
   const thresholdCents = toCents(settings?.alertThreshold ?? 0);
+  const firstNegative = alertProjection.firstNegative;
   const firstBelow =
     thresholdCents > 0
-      ? projection.days.find((d) => d.endingCents < thresholdCents)
+      ? alertProjection.days.find((d) => d.endingCents < thresholdCents)
       : undefined;
-  const belowIsDistinct = Boolean(
-    firstBelow && firstBelow.date !== projection.firstNegative?.date,
-  );
+  const belowIsDistinct = Boolean(firstBelow && firstBelow.date !== firstNegative?.date);
   const heroAlert = heroCents < 0 || (thresholdCents > 0 && heroCents < thresholdCents);
 
   function openNew(p?: Partial<ItemDraft>) {
@@ -103,15 +103,17 @@ export function DailyLedger() {
               Below {formatMoney(thresholdCents)} {formatLongDate(firstBelow.date)}
             </span>
           ) : null}
-          {projection.firstNegative ? (
+          {firstNegative ? (
             <span className="text-danger">
-              Goes negative {formatLongDate(projection.firstNegative.date)}
+              Goes negative {formatLongDate(firstNegative.date)}
             </span>
-          ) : !belowIsDistinct && projection.min ? (
+          ) : null}
+          {!firstNegative && !firstBelow && projection.min ? (
             <span className="text-muted">
               Low {formatMoney(projection.min.cents)} on {formatLongDate(projection.min.date)}
             </span>
-          ) : !belowIsDistinct && !projection.min ? (
+          ) : null}
+          {!firstNegative && !firstBelow && !projection.min ? (
             <span className="text-muted">No days in this window</span>
           ) : null}
         </div>

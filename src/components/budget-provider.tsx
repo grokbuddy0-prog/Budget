@@ -39,6 +39,7 @@ type BudgetContextValue = {
   setMonths: (m: ProjectionMonths) => void;
   today: string;
   projection: Projection;
+  alertProjection: Projection;
   refresh: () => Promise<void>;
   saveUserSettings: (s: {
     startingBalance: number;
@@ -95,20 +96,34 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [refresh]);
 
-  const projection = useMemo(() => {
+  const alertProjection = useMemo(() => {
     const startDate = settings?.startingBalanceDate ?? today;
     const startBal = settings?.startingBalance ?? 0;
     const fromDate = startDate > today ? startDate : today;
-    const toDate = windowEnd(fromDate, months);
     return projectCashflow({
       startingBalance: startBal,
       startingDate: startDate,
       items,
       overrides,
       fromDate,
-      toDate,
+      toDate: windowEnd(fromDate, 12),
     });
-  }, [settings, items, overrides, months, today]);
+  }, [settings, items, overrides, today]);
+
+  const projection = useMemo(() => {
+    if (months === 12) return alertProjection;
+    const startDate = settings?.startingBalanceDate ?? today;
+    const startBal = settings?.startingBalance ?? 0;
+    const fromDate = startDate > today ? startDate : today;
+    return projectCashflow({
+      startingBalance: startBal,
+      startingDate: startDate,
+      items,
+      overrides,
+      fromDate,
+      toDate: windowEnd(fromDate, months),
+    });
+  }, [alertProjection, settings, items, overrides, months, today]);
 
   const saveUserSettings = useCallback(
     async (s: {
@@ -240,6 +255,7 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
       setMonths,
       today,
       projection,
+      alertProjection,
       refresh,
       saveUserSettings,
       saveItem,
@@ -256,6 +272,7 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
       months,
       today,
       projection,
+      alertProjection,
       refresh,
       saveUserSettings,
       saveItem,
