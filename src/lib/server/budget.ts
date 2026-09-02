@@ -23,6 +23,7 @@ type SettingsRow = {
   currency: string;
   projection_months: number;
   balance_view: string | null;
+  alert_threshold: unknown;
   is_admin: boolean;
 };
 
@@ -68,6 +69,7 @@ function mapSettings(row: SettingsRow): UserSettings {
     currency: row.currency || "USD",
     projectionMonths: asMonths(Number(row.projection_months) || 6),
     balanceView: asBalanceView(row.balance_view),
+    alertThreshold: Math.max(0, dollarsFromUnknown(row.alert_threshold)),
     isAdmin: Boolean(row.is_admin),
   };
 }
@@ -117,7 +119,7 @@ export const getBudget = createServerFn({ method: "GET" })
     const uid = context.userId;
     const [settingsRows, itemRows, overrideRows] = await Promise.all([
       sql<SettingsRow>`
-        select starting_balance, starting_balance_date, currency, projection_months, balance_view, is_admin
+        select starting_balance, starting_balance_date, currency, projection_months, balance_view, alert_threshold, is_admin
         from user_settings where user_id = ${uid}
       `,
       sql<ItemRow>`
@@ -146,6 +148,7 @@ const settingsInput = z.object({
   startingBalanceDate: iso,
   projectionMonths: z.union([z.literal(1), z.literal(3), z.literal(6), z.literal(12)]),
   balanceView: z.enum(["every_day", "activity"]).optional(),
+  alertThreshold: z.coerce.number().finite().min(0).optional(),
   claimAdmin: z.boolean().optional(),
 });
 
@@ -166,18 +169,20 @@ export const saveSettings = createServerFn({ method: "POST" })
       if ((admins[0]?.n ?? 0) === 0) isAdmin = true;
     }
     const view = data.balanceView ?? "every_day";
+    const threshold = data.alertThreshold ?? 0;
     await sql`
       insert into user_settings (
-        user_id, starting_balance, starting_balance_date, currency, projection_months, balance_view, is_admin, updated_at
+        user_id, starting_balance, starting_balance_date, currency, projection_months, balance_view, alert_threshold, is_admin, updated_at
       ) values (
         ${uid}, ${data.startingBalance}, ${data.startingBalanceDate}, 'USD',
-        ${data.projectionMonths}, ${view}, ${isAdmin}, now()
+        ${data.projectionMonths}, ${view}, ${threshold}, ${isAdmin}, now()
       )
       on conflict (user_id) do update set
         starting_balance = excluded.starting_balance,
         starting_balance_date = excluded.starting_balance_date,
         projection_months = excluded.projection_months,
         balance_view = excluded.balance_view,
+        alert_threshold = excluded.alert_threshold,
         is_admin = user_settings.is_admin or excluded.is_admin,
         updated_at = now()
     `;

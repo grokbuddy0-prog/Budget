@@ -31,6 +31,7 @@ function SettingsBody() {
   const [date, setDate] = useState("");
   const [months, setMonths] = useState<ProjectionMonths>(6);
   const [balanceView, setBalanceView] = useState<BalanceView>("every_day");
+  const [threshold, setThreshold] = useState("");
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -40,6 +41,7 @@ function SettingsBody() {
     setDate(settings.startingBalanceDate);
     setMonths(settings.projectionMonths);
     setBalanceView(settings.balanceView);
+    setThreshold(settings.alertThreshold ? String(settings.alertThreshold) : "");
   }, [settings]);
 
   if (loading) return <PageSkeleton />;
@@ -59,6 +61,7 @@ function SettingsBody() {
         startingBalanceDate: asOf,
         projectionMonths: months,
         balanceView,
+        alertThreshold: parseDollars(threshold) ?? 0,
       });
       setSaved(true);
       window.setTimeout(() => setSaved(false), 1600);
@@ -106,6 +109,15 @@ function SettingsBody() {
             <option value="every_day">Every day</option>
             <option value="activity">Activity</option>
           </NativeSelect>
+        </Field>
+        <Field label="Warn below">
+          <Input
+            value={threshold}
+            onChange={(e) => setThreshold(e.target.value)}
+            inputMode="decimal"
+            placeholder="0"
+            className="font-mono tabular"
+          />
         </Field>
         <Button type="submit" disabled={busy}>
           {busy ? "Saving…" : saved ? "Saved" : "Save"}

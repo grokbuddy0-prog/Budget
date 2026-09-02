@@ -12,6 +12,7 @@ import {
   monthTitle,
   parseIso,
   todayLocalIso,
+  toCents,
   weekdayShort,
   type CashflowItem,
   type DayEvent,
@@ -64,7 +65,15 @@ export function DailyLedger() {
   }, [visible]);
 
   const heroCents = todayBalance(projection.days, today) ?? projection.endingCents;
-  const heroNegative = heroCents < 0;
+  const thresholdCents = toCents(settings?.alertThreshold ?? 0);
+  const firstBelow =
+    thresholdCents > 0
+      ? projection.days.find((d) => d.endingCents < thresholdCents)
+      : undefined;
+  const belowIsDistinct = Boolean(
+    firstBelow && firstBelow.date !== projection.firstNegative?.date,
+  );
+  const heroAlert = heroCents < 0 || (thresholdCents > 0 && heroCents < thresholdCents);
 
   function openNew(p?: Partial<ItemDraft>) {
     setEditing(null);
@@ -83,24 +92,29 @@ export function DailyLedger() {
         <p
           className={cn(
             "mt-1 font-mono text-4xl font-medium leading-none tracking-tight tabular",
-            heroNegative ? "text-danger" : "text-fg",
+            heroAlert ? "text-danger" : "text-fg",
           )}
         >
           {formatMoney(heroCents)}
         </p>
-        <p className="mt-2 text-sm text-muted">
+        <div className="mt-2 flex flex-col gap-0.5 text-sm">
+          {belowIsDistinct && firstBelow ? (
+            <span className="text-danger">
+              Below {formatMoney(thresholdCents)} {formatLongDate(firstBelow.date)}
+            </span>
+          ) : null}
           {projection.firstNegative ? (
             <span className="text-danger">
               Goes negative {formatLongDate(projection.firstNegative.date)}
             </span>
-          ) : projection.min ? (
-            <span>
+          ) : !belowIsDistinct && projection.min ? (
+            <span className="text-muted">
               Low {formatMoney(projection.min.cents)} on {formatLongDate(projection.min.date)}
             </span>
-          ) : (
-            "No days in this window"
-          )}
-        </p>
+          ) : !belowIsDistinct && !projection.min ? (
+            <span className="text-muted">No days in this window</span>
+          ) : null}
+        </div>
         <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
           <div className="rounded-md bg-surface px-3 py-2">
             <p className="text-[11px] uppercase tracking-wide text-muted">In</p>

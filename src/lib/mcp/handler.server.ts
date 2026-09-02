@@ -147,9 +147,10 @@ async function loadBudget(userId: string): Promise<BudgetSnapshot> {
       currency: string;
       projection_months: number;
       balance_view: string | null;
+      alert_threshold: unknown;
       is_admin: boolean;
     }>`
-      select starting_balance, starting_balance_date, currency, projection_months, balance_view, is_admin
+      select starting_balance, starting_balance_date, currency, projection_months, balance_view, alert_threshold, is_admin
       from user_settings where user_id = ${userId}
     `,
     sql<ItemRow>`
@@ -181,6 +182,7 @@ async function loadBudget(userId: string): Promise<BudgetSnapshot> {
         currency: settingsRow.currency || "USD",
         projectionMonths: asMonths(Number(settingsRow.projection_months) || 6),
         balanceView: settingsRow.balance_view === "activity" ? "activity" : "every_day",
+        alertThreshold: Math.max(0, dollarsFromUnknown(settingsRow.alert_threshold)),
         isAdmin: Boolean(settingsRow.is_admin),
       }
     : null;

@@ -65,6 +65,9 @@ export function getOverviewView(snap: BudgetSnapshot, today: IsoDate) {
   const todayRow = proj.days.find((d) => d.date === today) ?? proj.days[0];
   const todayCents = todayRow?.endingCents ?? toCents(settings.startingBalance);
   const min = proj.min;
+  const thresholdCents = toCents(settings.alertThreshold);
+  const firstBelow =
+    thresholdCents > 0 ? proj.days.find((d) => d.endingCents < thresholdCents) : undefined;
   const cushionCents = min ? todayCents - min.cents : 0;
   const end7 = addDays(today, 6);
   const hits = proj.days
@@ -80,6 +83,10 @@ export function getOverviewView(snap: BudgetSnapshot, today: IsoDate) {
     starting_balance_date: settings.startingBalanceDate,
     today_balance: money(todayCents),
     cushion: money(cushionCents),
+    alert_threshold: money(thresholdCents),
+    below_threshold: firstBelow
+      ? { date: firstBelow.date, ...money(firstBelow.endingCents) }
+      : null,
     lowest_30: min ? { date: min.date, ...money(min.cents) } : null,
     next_7_hits: hits,
   };

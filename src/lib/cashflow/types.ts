@@ -49,6 +49,7 @@ export type UserSettings = {
   currency: string;
   projectionMonths: ProjectionMonths;
   balanceView: BalanceView;
+  alertThreshold: number;
   isAdmin: boolean;
 };
 
