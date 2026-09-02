@@ -8,7 +8,7 @@ import { Field } from "@/components/ui/label";
 import { DateInput, Input, NativeSelect } from "@/components/ui/input";
 import { RedirectToSignIn, UserButton } from "@/lib/auth/gates";
 import { useCurrentUser } from "@/lib/auth/use-current-user";
-import { parseDollars, type ProjectionMonths } from "@/lib/cashflow";
+import { parseDollars, type BalanceView, type ProjectionMonths } from "@/lib/cashflow";
 
 export const Route = createFileRoute("/settings")({ component: SettingsPage });
 
@@ -30,6 +30,7 @@ function SettingsBody() {
   const [balance, setBalance] = useState("");
   const [date, setDate] = useState("");
   const [months, setMonths] = useState<ProjectionMonths>(6);
+  const [balanceView, setBalanceView] = useState<BalanceView>("every_day");
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -38,6 +39,7 @@ function SettingsBody() {
     setBalance(String(settings.startingBalance));
     setDate(settings.startingBalanceDate);
     setMonths(settings.projectionMonths);
+    setBalanceView(settings.balanceView);
   }, [settings]);
 
   if (loading) return <PageSkeleton />;
@@ -56,6 +58,7 @@ function SettingsBody() {
         startingBalance: amount,
         startingBalanceDate: asOf,
         projectionMonths: months,
+        balanceView,
       });
       setSaved(true);
       window.setTimeout(() => setSaved(false), 1600);
@@ -92,6 +95,15 @@ function SettingsBody() {
             <option value={3}>3 months</option>
             <option value={6}>6 months</option>
             <option value={12}>12 months</option>
+          </NativeSelect>
+        </Field>
+        <Field label="Default balances view">
+          <NativeSelect
+            value={balanceView}
+            onChange={(e) => setBalanceView(e.target.value as BalanceView)}
+          >
+            <option value="every_day">Every day</option>
+            <option value="activity">Activity</option>
           </NativeSelect>
         </Field>
         <Button type="submit" disabled={busy}>

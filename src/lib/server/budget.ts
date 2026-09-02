@@ -5,6 +5,7 @@ import { authMiddleware } from "@/lib/auth/middleware";
 import {
   dollarsFromUnknown,
   isIsoDate,
+  type BalanceView,
   type CashflowItem,
   type OccurrenceOverride,
   type ProjectionMonths,
@@ -21,6 +22,7 @@ type SettingsRow = {
   starting_balance_date: string;
   currency: string;
   projection_months: number;
+  balance_view: string | null;
   is_admin: boolean;
 };
 
@@ -55,12 +57,17 @@ function asMonths(n: number): ProjectionMonths {
   return 6;
 }
 
+function asBalanceView(v: string | null | undefined): BalanceView {
+  return v === "activity" ? "activity" : "every_day";
+}
+
 function mapSettings(row: SettingsRow): UserSettings {
   return {
     startingBalance: dollarsFromUnknown(row.starting_balance),
     startingBalanceDate: row.starting_balance_date,
     currency: row.currency || "USD",
     projectionMonths: asMonths(Number(row.projection_months) || 6),
+    balanceView: asBalanceView(row.balance_view),
     isAdmin: Boolean(row.is_admin),
   };
 }
@@ -110,7 +117,7 @@ export const getBudget = createServerFn({ method: "GET" })
     const uid = context.userId;
     const [settingsRows, itemRows, overrideRows] = await Promise.all([
       sql<SettingsRow>`
-        select starting_balance, starting_balance_date, currency, projection_months, is_admin
+        select starting_balance, starting_balance_date, currency, projection_months, balance_view, is_admin
         from user_settings where user_id = ${uid}
       `,
       sql<ItemRow>`
@@ -138,6 +145,7 @@ const settingsInput = z.object({
   startingBalance: money,
   startingBalanceDate: iso,
   projectionMonths: z.union([z.literal(3), z.literal(6), z.literal(12)]),
+  balanceView: z.enum(["every_day", "activity"]).optional(),
   claimAdmin: z.boolean().optional(),
 });
 
@@ -157,17 +165,19 @@ export const saveSettings = createServerFn({ method: "POST" })
       `;
       if ((admins[0]?.n ?? 0) === 0) isAdmin = true;
     }
+    const view = data.balanceView ?? "every_day";
     await sql`
       insert into user_settings (
-        user_id, starting_balance, starting_balance_date, currency, projection_months, is_admin, updated_at
+        user_id, starting_balance, starting_balance_date, currency, projection_months, balance_view, is_admin, updated_at
       ) values (
         ${uid}, ${data.startingBalance}, ${data.startingBalanceDate}, 'USD',
-        ${data.projectionMonths}, ${isAdmin}, now()
+        ${data.projectionMonths}, ${view}, ${isAdmin}, now()
       )
       on conflict (user_id) do update set
         starting_balance = excluded.starting_balance,
         starting_balance_date = excluded.starting_balance_date,
         projection_months = excluded.projection_months,
+        balance_view = excluded.balance_view,
         is_admin = user_settings.is_admin or excluded.is_admin,
         updated_at = now()
     `;

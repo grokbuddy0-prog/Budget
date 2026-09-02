@@ -44,6 +44,7 @@ type BudgetContextValue = {
     startingBalance: number;
     startingBalanceDate: string;
     projectionMonths: ProjectionMonths;
+    balanceView?: UserSettings["balanceView"];
     claimAdmin?: boolean;
   }) => Promise<void>;
   saveItem: (draft: ItemDraft) => Promise<string>;
@@ -113,19 +114,24 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
       startingBalance: number;
       startingBalanceDate: string;
       projectionMonths: ProjectionMonths;
+      balanceView?: UserSettings["balanceView"];
       claimAdmin?: boolean;
     }) => {
       const prev = settings;
+      const balanceView = s.balanceView ?? prev?.balanceView ?? "every_day";
       setSettings({
         startingBalance: s.startingBalance,
         startingBalanceDate: s.startingBalanceDate,
         currency: "USD",
         projectionMonths: s.projectionMonths,
+        balanceView,
         isAdmin: prev?.isAdmin ?? false,
       });
       setMonths(s.projectionMonths);
       try {
-        const res = await saveSettings({ data: s });
+        const res = await saveSettings({
+          data: { ...s, balanceView },
+        });
         setSettings((cur) =>
           cur ? { ...cur, isAdmin: res.isAdmin || cur.isAdmin } : cur,
         );

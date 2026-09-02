@@ -26,6 +26,7 @@ const snap: BudgetSnapshot = {
     startingBalanceDate: "2026-09-01",
     currency: "USD",
     projectionMonths: 6,
+    balanceView: "every_day",
     isAdmin: true,
   },
   items: [

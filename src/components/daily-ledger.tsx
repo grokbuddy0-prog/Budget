@@ -41,7 +41,9 @@ export function DailyLedger() {
     setOverride,
     removeOverride,
   } = useBudget();
-  const [activityOnly, setActivityOnly] = useState(false);
+  const [activityOnly, setActivityOnly] = useState(
+    () => settings?.balanceView === "activity",
+  );
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<CashflowItem | null>(null);
   const [event, setEvent] = useState<{ day: DayProjection; ev: DayEvent } | null>(null);
