@@ -16,6 +16,7 @@ export const Route = createRootRoute({
       { name: "description", content: "See your checking balance every day, months ahead." },
       { name: "apple-mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-title", content: APP_NAME },
+      { name: "application-name", content: APP_NAME },
       { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
     ],
     links: [

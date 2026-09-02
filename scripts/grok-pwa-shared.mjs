@@ -157,8 +157,12 @@ export function renderInstallPageHtml(template, { host, url } = {}) {
     .replaceAll("{{APP_URL}}", escapeHtml(stripInstallParams(url)));
 }
 
-export function renderWebManifest(hostHeader, cwd = process.cwd()) {
-  const site = snapshotOgIdentity(cwd).site;
+export function renderWebManifest(hostHeader, options = {}) {
+  const cwd = typeof options === "string" ? options : (options.cwd ?? process.cwd());
+  const site =
+    options && typeof options === "object" && options.site !== undefined
+      ? options.site
+      : snapshotOgIdentity(cwd).site;
   const name = resolveOgTitle(site, DEFAULT_APP_NAME, hostHeader);
   return JSON.stringify(
     {
