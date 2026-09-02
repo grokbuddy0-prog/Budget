@@ -55,7 +55,7 @@ export function RedirectToSignIn({ to = SIGN_IN_PATH }: { to?: string }) {
  * gate-materialized — behind the gate the next request signs the viewer
  * straight back in, so a sign-out control there is a broken loop.
  */
-export function UserButton() {
+export function UserButton({ showIdentity = true }: { showIdentity?: boolean } = {}) {
   const user = useCurrentUser();
   // Sign-out can take a moment (and can fail when deployed), so the control
   // shows it is working and cannot be fired twice.
@@ -69,18 +69,22 @@ export function UserButton() {
   const label = user.displayName ?? user.primaryEmail ?? "Account";
   return (
     <div className="flex items-center gap-2">
-      {user.profileImageUrl ? (
-        <img
-          src={user.profileImageUrl}
-          alt=""
-          className="h-8 w-8 rounded-full object-cover"
-        />
-      ) : (
-        <span className="grid h-8 w-8 place-items-center rounded-full bg-black/10 text-sm font-medium dark:bg-white/20">
-          {label.charAt(0).toUpperCase()}
-        </span>
-      )}
-      <span className="text-sm font-medium">{label}</span>
+      {showIdentity ? (
+        <>
+          {user.profileImageUrl ? (
+            <img
+              src={user.profileImageUrl}
+              alt=""
+              className="h-8 w-8 rounded-full object-cover"
+            />
+          ) : (
+            <span className="grid h-8 w-8 place-items-center rounded-full bg-black/10 text-sm font-medium dark:bg-white/20">
+              {label.charAt(0).toUpperCase()}
+            </span>
+          )}
+          <span className="text-sm font-medium">{label}</span>
+        </>
+      ) : null}
       {authEnabled && !gateSession && (
         <button
           type="button"

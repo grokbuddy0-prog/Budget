@@ -119,7 +119,7 @@ function SettingsBody() {
           <p className="mt-2 text-xs text-muted">Admin</p>
         ) : null}
         <div className="mt-3 [&_button]:h-11 [&_button]:w-full [&_button]:rounded-md [&_button]:border [&_button]:border-border [&_button]:bg-surface-2 [&_button]:text-sm">
-          <UserButton />
+          <UserButton showIdentity={false} />
         </div>
       </section>
     </div>

@@ -30,7 +30,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           {isPending ? (
             <div className="h-9 w-16 animate-pulse rounded-md bg-surface-2" />
           ) : (
-            <UserButton />
+            <UserButton showIdentity={false} />
           )}
         </div>
       </header>
