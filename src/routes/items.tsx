@@ -220,6 +220,8 @@ function ItemsBody() {
                           {formatLongDate(hit.date)}
                           {hit.skipped ? (
                             <span className="ml-1 text-[10px] uppercase text-muted">skipped</span>
+                          ) : hit.date !== hit.originalDate ? (
+                            <span className="ml-1 text-[10px] uppercase text-muted">moved</span>
                           ) : hit.overridden ? (
                             <span className="ml-1 text-[10px] uppercase text-muted">adj</span>
                           ) : null}
@@ -273,13 +275,14 @@ function ItemsBody() {
                 });
                 setOne(null);
               }}
-              onAmount={async (amount) => {
+              onSave={async (amount, payDate) => {
+                const originalDate = one.event.originalDate;
                 await setOverride({
                   itemId: one.event.itemId,
-                  originalDate: one.event.originalDate,
-                  kind: "amount",
+                  originalDate,
+                  kind: payDate !== originalDate ? "move" : "amount",
                   amount,
-                  movedDate: null,
+                  movedDate: payDate !== originalDate ? payDate : null,
                 });
                 setOne(null);
               }}

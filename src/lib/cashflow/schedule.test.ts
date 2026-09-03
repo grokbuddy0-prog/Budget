@@ -186,3 +186,40 @@ test("skip override removes a posting; amount override changes it", () => {
   assert.equal(mar?.events[0]?.amountCents, -120000);
   assert.equal(mar?.endingCents, 80000);
 });
+
+test("move override posts a bill on the new date only", () => {
+  const rent = item({
+    id: "rent",
+    name: "Rent",
+    type: "bill",
+    amount: 1000,
+    frequency: "monthly",
+    startDate: "2026-01-01",
+    dueDay: 1,
+  });
+  const proj = projectCashflow({
+    startingBalance: 3000,
+    startingDate: "2026-01-01",
+    items: [rent],
+    overrides: [
+      {
+        id: "o1",
+        itemId: "rent",
+        originalDate: "2026-02-01",
+        kind: "move",
+        amount: null,
+        movedDate: "2026-01-28",
+      },
+    ],
+    fromDate: "2026-01-01",
+    toDate: "2026-02-01",
+  });
+  const jan1 = proj.days.find((d) => d.date === "2026-01-01");
+  const jan28 = proj.days.find((d) => d.date === "2026-01-28");
+  const feb1 = proj.days.find((d) => d.date === "2026-02-01");
+  assert.equal(jan1?.events.length, 1);
+  assert.equal(jan28?.events[0]?.name, "Rent");
+  assert.equal(jan28?.events[0]?.originalDate, "2026-02-01");
+  assert.equal(jan28?.endingCents, 100000);
+  assert.equal(feb1?.events.length, 0);
+});

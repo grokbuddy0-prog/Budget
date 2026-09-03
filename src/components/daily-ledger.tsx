@@ -244,13 +244,14 @@ export function DailyLedger() {
                 });
                 setEvent(null);
               }}
-              onAmount={async (amount) => {
+              onSave={async (amount, payDate) => {
+                const originalDate = event.ev.originalDate;
                 await setOverride({
                   itemId: event.ev.itemId,
-                  originalDate: event.ev.originalDate,
-                  kind: "amount",
+                  originalDate,
+                  kind: payDate !== originalDate ? "move" : "amount",
                   amount,
-                  movedDate: null,
+                  movedDate: payDate !== originalDate ? payDate : null,
                 });
                 setEvent(null);
               }}
@@ -334,7 +335,9 @@ function DayRow({
                   >
                     <span className="truncate text-sm text-fg">
                       {ev.name}
-                      {ev.overridden ? (
+                      {day.date !== ev.originalDate ? (
+                        <span className="ml-1 text-[10px] uppercase text-muted">moved</span>
+                      ) : ev.overridden ? (
                         <span className="ml-1 text-[10px] uppercase text-muted">adj</span>
                       ) : null}
                     </span>
